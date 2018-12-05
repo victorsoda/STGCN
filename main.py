@@ -55,7 +55,7 @@ decay_interval = 5
 epochs = 10
 
 # batch_size
-batch_size = 50
+batch_size = 25   # 原本是50
 ##########
 
 def get_D(A):
@@ -120,11 +120,11 @@ def data_preprocess():
         A[y_index, x_index] = dis
 
     # compute the variance of the all distances which does not equal zero
-    tmp = A.flatten()
+    tmp = A.flatten()   # 将矩阵A铺展成1维向量
     var = np.var(tmp[tmp!=0])
 
     # normalization
-    A = np.exp(- (A ** 2) / var)
+    A = np.exp(- (A ** 2) / var)    # 论文数据预处理部分，对邻接矩阵W按距离带权处理
 
     # drop the value less than threshold
     A[A < epsilon] = 0
@@ -159,14 +159,15 @@ def loss(output, target):
     
     target: mx.ndarray, target value of the prediction, shape is (batch_size, num_of_vertices, num_points_for_predicting)
     '''
-    return nd.sum((output - target) ** 2) / np.prod(output.shape)
+    return nd.sqrt(nd.sum((output - target) ** 2) / np.prod(output.shape))  # 改成了RMSE
 
 class time_conv_block(nn.Block):
     def __init__(self, **kwargs):
         super(time_conv_block, self).__init__(**kwargs)
         self.conv1 = nn.Conv2D(Co, (1, kernel_size), activation = 'relu', layout = 'NHWC')
         self.conv2 = nn.Conv2D(Co, (1, kernel_size), activation = 'relu', layout = 'NHWC')
-        self.conv3 = nn.Conv2D(Co, kernel_size = (1, 3), layout = 'NHWC')
+        self.conv3 = nn.Conv2D(Co, kernel_size = (1, kernel_size), layout = 'NHWC')
+        # kernel_size: 3,  Co: 64 (num of 1-D filters in time_conv_block)
     
     def forward(self, x):
         t = self.conv1(x) + nd.sigmoid(self.conv2(x))
@@ -279,9 +280,9 @@ def train_model(net, training_dataloader, validation_dataloader, testing_dataloa
         test_loss_list.append( sum(test_loss_list_tmp) / len(test_loss_list_tmp) )
 
         print('current epoch is %s'%(epoch + 1))
-        print('training loss(MSE):', train_loss_list[-1])
-        print('validation loss(MSE):', val_loss_list[-1])
-        print('testing loss(MSE):', test_loss_list[-1])
+        print('training loss(RMSE):', train_loss_list[-1])
+        print('validation loss(RMSE):', val_loss_list[-1])
+        print('testing loss(RMSE):', test_loss_list[-1])
         print('time:', time.time() - t)
         print()
 
@@ -303,7 +304,9 @@ def train_model(net, training_dataloader, validation_dataloader, testing_dataloa
     return train_loss_list, val_loss_list, test_loss_list
 
 if __name__ == "__main__":
-    A, X = data_preprocess()
+    # /data 文件夹下提取出的数据情况如下：
+    # 路口（结点）数：307    每个结点上的特征数：3    每隔5分钟采样一次，总共连续采样的序列长度：500 (num_of_samples)
+    A, X = data_preprocess()    # A.shape: (307, 307),  X.shape: (307, 3, 500)
 
     # training: validation: testing = 6: 2: 2
     split_line1 = int(X.shape[2] * 0.6)
@@ -313,14 +316,16 @@ if __name__ == "__main__":
     val_original_data = X[:, :, split_line1: split_line2]
     test_original_data = X[:, :, split_line2:]
 
+    # 设定： 用于训练的序列长度：24    要预测的序列长度：12
+    # training_data = 265 * (307, 24, 3),    training_target = 265 * (307, 12)
     training_data, training_target = make_dataset(train_original_data)
     val_data, val_target = make_dataset(val_original_data)
     testing_data, testing_target = make_dataset(test_original_data)
 
     # pre-computing
-    A_wave = A + nd.array(np.diag(np.ones(A.shape[0])), ctx = ctx)
-    D_wave = get_D_wave(A_wave)
-    D_wave_ = get_D_(D_wave)
+    A_wave = A + nd.array(np.diag(np.ones(A.shape[0])), ctx = ctx)  # 论文1阶近似部分：W~ = W + In
+    D_wave = get_D_wave(A_wave)  # W~的度矩阵D~
+    D_wave_ = get_D_(D_wave)    # D~的-1/2次方
     A_hat = nd.dot(nd.dot(D_wave_, A_wave), D_wave_)
 
     # model initialization

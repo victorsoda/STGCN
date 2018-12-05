@@ -1,0 +1,6 @@
+.idea/
+results.log
+stgcn_param*/
+__pycache__/
+lib/__pycache__/
+
