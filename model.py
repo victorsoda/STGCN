@@ -13,6 +13,27 @@ from lib.utils import *
 from myglobals import *
 
 
+class LayerNorm(nn.Block):
+
+    def __init__(self, eps=1e-5, **kwargs):
+        super(LayerNorm, self).__init__(**kwargs)
+        self.eps = eps
+        self.gamma = self.params.get('gamma', allow_deferred_init=True, init=mx.init.One())
+        self.beta = self.params.get('beta', allow_deferred_init=True, init=mx.init.Zero())
+
+    def forward(self, x):
+        if autograd.is_training():
+            _, *tmp = x.shape
+            self.gamma.shape = [1] + tmp
+            self.gamma._finish_deferred_init()
+            self.beta.shape = [1] + tmp
+            self.beta._finish_deferred_init()
+
+        mu = x.mean(axis=1, keepdims=True)
+        sigma = nd.sqrt(((x - mu) ** 2).mean(axis=1, keepdims=True))
+        return ((x - mu) / (sigma + self.eps)) * self.gamma.data() + self.beta.data()
+
+
 class cheb_conv(nn.Block):
     '''
     K-order chebyshev graph convolution
@@ -109,8 +130,9 @@ class ST_block(nn.Block):  # 时空卷积块
             self.time_conv1 = temporal_conv_layer(num_of_time_conv_filters1, K_t)
             self.cheb_conv = cheb_conv(num_of_cheb_filters, K, cheb_polys)
             self.time_conv2 = temporal_conv_layer(num_of_time_conv_filters2, K_t)
-            self.bn = nn.BatchNorm()
-            
+            # self.bn = nn.BatchNorm()
+            self.bn = LayerNorm()
+
     def forward(self, x):   # x.shape = (50, 3, 307, 12)
         '''
         Parameters
@@ -161,12 +183,12 @@ class STGCN(nn.Block):
 
         batch_size, num_of_vertices, num_of_features = final_conv_output.shape
         
-        self.final_fc_weight.shape = (num_of_features, 1)
+        self.final_fc_weight.shape = (num_of_features, num_points_for_predict)
         self.final_fc_weight._finish_deferred_init()
-        self.final_fc_bias.shape = (1, )
+        self.final_fc_bias.shape = (num_points_for_predict, )
         self.final_fc_bias._finish_deferred_init()
 
-        return nd.dot(final_conv_output, self.final_fc_weight.data()) + self.final_fc_bias.data()   # (50, 307, 1)
+        return nd.dot(final_conv_output, self.final_fc_weight.data()) + self.final_fc_bias.data()   # (50, 307, num_points_to_predict)
     
 if __name__ == "__main__":
     ctx = mx.gpu(0)
@@ -180,7 +202,7 @@ if __name__ == "__main__":
     # a = nd.concat(*a, dim=-1)
     # print(a.shape)
 
-    distance_df = pd.read_csv(distance_filepath, dtype={'from': 'int', 'to': 'int'})  # '../data/METR-LA/preprocessed/distance.csv'
+    distance_df = pd.read_csv(distance_filepath, dtype={'from': 'int', 'to': 'int'})
     num_of_vertices = 307
     A = get_adjacency_matrix(distance_df, num_of_vertices, normalized_k_threshold)
     L_tilde = scaled_Laplacian(A)
@@ -209,7 +231,7 @@ if __name__ == "__main__":
         'num_of_time_conv_filters1': 64,
         'num_of_time_conv_filters2': 64,
         'K_t': 3,
-        'num_of_cheb_filters': 16,    # 原来是32
+        'num_of_cheb_filters': 16,
         'K': cheb_K,
         'cheb_polys': cheb_polys
     },
