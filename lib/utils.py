@@ -7,6 +7,7 @@ from mxnet import nd
 from mxnet import autograd
 from myglobals import *
 
+
 def scaled_Laplacian(W):
     '''
     compute \tilde{L}
@@ -30,6 +31,7 @@ def scaled_Laplacian(W):
     lambda_max = eigs(L, k = 1, which = 'LR')[0].real
     
     return (2 * L) / lambda_max - np.identity(W.shape[0])
+
 
 def cheb_polynomial(L_tilde, K):
     '''
@@ -55,6 +57,7 @@ def cheb_polynomial(L_tilde, K):
         cheb_polynomials.append(2 * L_tilde * cheb_polynomials[i - 1] - cheb_polynomials[i - 2])
         
     return cheb_polynomials
+
 
 def get_adjacency_matrix(distance_df, num_of_vertices, normalized_k=0.1):
     """
@@ -160,6 +163,19 @@ def loss(output, target):
     return nd.sqrt(nd.sum((output - target) ** 2) / np.prod(output.shape))  # 改成了RMSE
 
 
+def get_net_output_step_by_step(net, x, y, step):
+    output = x
+    for i in range(step):
+        # output = net(x)
+        # l = loss(output, y)
+        origin_output = output
+        output = net(output)
+        if i == y.shape[-1] - 1:
+            break
+        output = nd.concat(origin_output[:, :, :, 1:], nd.expand_dims(output.transpose((0, 2, 1)), axis=-1), dim=-1)
+    return output
+
+
 def train_model(net, trainer, training_dataloader, validation_dataloader, testing_dataloader):
     '''
     train the model
@@ -190,8 +206,8 @@ def train_model(net, trainer, training_dataloader, validation_dataloader, testin
         train_loss_list_tmp = []
         for x, y in training_dataloader:
             with autograd.record():
-                output = net(x)
-                l = loss(output, y)
+                output = get_net_output_step_by_step(net, x, y, y.shape[-1])
+                l = loss(output[:, :, 0], y[:, :, -1])
             l.backward()
             train_loss_list_tmp.append(l.asscalar())
             trainer.step(batch_size)
@@ -200,15 +216,21 @@ def train_model(net, trainer, training_dataloader, validation_dataloader, testin
 
         val_loss_list_tmp = []
         for x, y in validation_dataloader:
-            output = net(x)
-            val_loss_list_tmp.append(loss(output, y).asscalar())
+            # output = net(x)
+            # val_loss_list_tmp.append(loss(output, y).asscalar())
+            output = get_net_output_step_by_step(net, x, y, y.shape[-1])
+            l = loss(output[:, :, 0], y[:, :, -1])
+            val_loss_list_tmp.append(l.asscalar())
 
         val_loss_list.append(sum(val_loss_list_tmp) / len(val_loss_list_tmp))
 
         test_loss_list_tmp = []
         for x, y in testing_dataloader:
-            output = net(x)
-            test_loss_list_tmp.append(loss(output, y).asscalar())
+            # output = net(x)
+            # test_loss_list_tmp.append(loss(output, y).asscalar())
+            output = get_net_output_step_by_step(net, x, y, y.shape[-1])
+            l = loss(output[:, :, 0], y[:, :, -1])
+            test_loss_list_tmp.append(l.asscalar())
 
         test_loss_list.append(sum(test_loss_list_tmp) / len(test_loss_list_tmp))
 
@@ -228,7 +250,7 @@ def train_model(net, trainer, training_dataloader, validation_dataloader, testin
             f.write('\n\n')
 
         if (epoch + 1) % 5 == 0:
-            filename = 'stgcn_params/stgcn.params_%s' % (epoch)
+            filename = params_file_prefix + str(epoch)
             net.save_parameters(filename)
 
         if (epoch + 1) % decay_interval == 0:

@@ -183,12 +183,12 @@ class STGCN(nn.Block):
 
         batch_size, num_of_vertices, num_of_features = final_conv_output.shape
         
-        self.final_fc_weight.shape = (num_of_features, num_points_for_predict)
+        self.final_fc_weight.shape = (num_of_features, 1 * num_input_features)
         self.final_fc_weight._finish_deferred_init()
-        self.final_fc_bias.shape = (num_points_for_predict, )
+        self.final_fc_bias.shape = (1 * num_input_features, )
         self.final_fc_bias._finish_deferred_init()
 
-        return nd.dot(final_conv_output, self.final_fc_weight.data()) + self.final_fc_bias.data()   # (50, 307, num_points_to_predict)
+        return nd.dot(final_conv_output, self.final_fc_weight.data()) + self.final_fc_bias.data()   # (50, 307, 3)
     
 if __name__ == "__main__":
     ctx = mx.gpu(0)
@@ -221,6 +221,7 @@ if __name__ == "__main__":
     training_data, training_target = make_dataset(train_original_data)
     val_data, val_target = make_dataset(val_original_data)
     testing_data, testing_target = make_dataset(test_original_data)
+    print(type(training_data[0]))
     print(training_data[0].shape)
     # exit(2)
 
@@ -244,7 +245,10 @@ if __name__ == "__main__":
         'cheb_polys': cheb_polys
     }]
     net = STGCN(backbones, 64)
-    net.initialize(ctx = ctx)
+    net.initialize(ctx=ctx)
+
+    if load_epoch != 0:
+        net.load_parameters(params_file_prefix+str(load_epoch), ctx=ctx)
 
     # batch_size, num_of_features, num_of_vertices, num_of_timesteps = x.shape
     # print(net(nd.random_uniform(shape = (5, 3, 307, 12), ctx=ctx)).shape)
